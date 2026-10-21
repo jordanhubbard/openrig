@@ -58,6 +58,8 @@ export function attachCommand(depsOverride?: StatusDeps): Command {
     .option("--runtime <runtime>", "Runtime for pod attach mode; optional guard for node mode")
     .option("--cwd <path>", "Working directory to record", process.cwd())
     .option("--display-name <name>", "External session/display name to record")
+    .option("--relay-ssh-host <host>", "Existing trusted SSH alias for a Codex tmux relay")
+    .option("--relay-tmux-session <session>", "Remote tmux session reached by the canonical SSH attach command")
     .option("--print-env", "Print shell exports for OPENRIG_NODE_ID and OPENRIG_SESSION_NAME")
     .option("--json", "JSON output")
     .action(async (opts: {
@@ -69,6 +71,8 @@ export function attachCommand(depsOverride?: StatusDeps): Command {
       runtime?: string;
       cwd?: string;
       displayName?: string;
+      relaySshHost?: string;
+      relayTmuxSession?: string;
       printEnv?: boolean;
       json?: boolean;
     }) => {
@@ -123,6 +127,13 @@ export function attachCommand(depsOverride?: StatusDeps): Command {
         body["displayName"] = opts.displayName;
       }
 
+      if (opts.relaySshHost || opts.relayTmuxSession) {
+        if (!opts.relaySshHost || !opts.relayTmuxSession || opts.runtime !== "codex" || attachContext.attachmentType !== "tmux") {
+          console.error("SSH relay attach requires both relay options, --runtime codex, and a local tmux pane.");
+          process.exitCode = 1; return;
+        }
+        body["relay"] = { kind: "ssh-tmux", host: opts.relaySshHost, session: opts.relayTmuxSession };
+      }
       if (hasNode) {
         body["logicalId"] = opts.node;
       } else {
