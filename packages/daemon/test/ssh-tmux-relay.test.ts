@@ -50,6 +50,37 @@ describe("explicit SSH tmux Codex identity", () => {
     expect(await verifyCodexPaneProcess({ target: "%2", tmux: { getPanePid: async () => 20 }, listProcesses: () => remote }))
       .toMatchObject({ panePid: 20, process: { pid: 30 } });
   });
+  it("does not reuse a successful observation while the execution host is unreachable", async () => {
+    let reachable = true;
+    let probes = 0;
+    const readRelay = async () => { probes++; return reachable ? snapshot : null; };
+    expect(await verifyCodexPaneProcess({ ...input(), readRelay })).not.toBeNull();
+    reachable = false;
+    expect(await verifyCodexPaneProcess({ ...input(), readRelay })).toBeNull();
+    reachable = true;
+    expect(await verifyCodexPaneProcess({ ...input(), readRelay })).not.toBeNull();
+    expect(probes).toBe(5);
+  });
+  it("revalidates a reconnected relay and rejects a different runtime in its remote pane", async () => {
+    let current = snapshot;
+    const readRelay = async () => current;
+    const first = await verifyCodexPaneProcess({ ...input(), readRelay });
+    expect(first).not.toBeNull();
+    current = { ...snapshot, identity: "$2 200 %3 20", rows: remote.map(r => ({ ...r, startedAt: "Wed Oct 21 02:03:04 2026" })) };
+    const reconnected = await verifyCodexPaneProcess({ ...input(), readRelay });
+    expect(reconnected).not.toBeNull();
+    expect(reconnected!.fingerprint).not.toBe(first!.fingerprint);
+    current = { ...current, rows: [row(20, 1, "sh", "sh", 30), row(30, 20, "claude", "claude", 30)] };
+    expect(await verifyCodexPaneProcess({ ...input(), readRelay })).toBeNull();
+  });
+  it("rejects a relay binding that changes during remote observation", async () => {
+    let binding = relay;
+    const found = await verifyCodexPaneProcess({ ...input(),
+      tmux: { getPanePid: async () => 10, getSshRelay: () => binding },
+      readRelay: async () => { binding = { ...relay, session: "replacement" }; return snapshot; },
+    });
+    expect(found).toBeNull();
+  });
   it("parses one remote pane and refuses multi-pane or malformed snapshots", () => {
     const table = "PID PPID PGID TPGID UCOMM STARTED COMMAND\n20 1 30 30 sh Wed Oct 21 01:02:03 2026 sh\n30 20 30 30 codex Wed Oct 21 01:02:03 2026 codex\n";
     const bytes = "$1 100 %2 20\n\nOPENRIG_PROCESS_TABLE\n" + table;
